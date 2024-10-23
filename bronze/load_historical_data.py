@@ -22,6 +22,17 @@ class FetchDataFromAPI(beam.DoFn):
         else:
             raise Exception(f"Failed to fetch data from API: {response.status_code}")
 
+
+def convert_timestamp_to_gmt(timestamp_ms):
+    """
+    Convert Unix timestamp in milliseconds to GMT.
+    """
+    if timestamp_ms is not None:
+        timestamp_s = timestamp_ms / 1000
+        return datetime.utcfromtimestamp(timestamp_s).strftime('%Y-%m-%d %H:%M:%S')
+    return None
+
+
 class FlattenJSONData(beam.DoFn):
     """
     Flatten the JSON structure to prepare it for writing to BigQuery or other outputs.
@@ -68,14 +79,6 @@ class FlattenJSONData(beam.DoFn):
             }
             yield flattened_record
 
-def convert_timestamp_to_gmt(timestamp_ms):
-    """
-    Convert Unix timestamp in milliseconds to GMT.
-    """
-    if timestamp_ms is not None:
-        timestamp_s = timestamp_ms / 1000
-        return datetime.utcfromtimestamp(timestamp_s).strftime('%Y-%m-%d %H:%M:%S')
-    return None
 
 class AddColumnArea(beam.DoFn):
     """
