@@ -6,8 +6,6 @@ from datetime import datetime
 from google.cloud import storage
 import logging
 import os 
-from apache_beam.io.gcp.bigquery import WriteToBigQuery, BigQueryDisposition
-
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"C:\Users\Dinesh Mote\Downloads\gcp-data-project-433112-aecffc0dc374.json"
 logging.getLogger().setLevel(logging.INFO)
@@ -94,16 +92,6 @@ class AddColumnArea(beam.DoFn):
             area = "Unknown"  # Handle cases where 'of' is not found
         record["area"] = area
         yield record
-        
-        
-class AddInsertDate(beam.DoFn):
-    """
-    Add an insert_date column to each record with the current date in 'YYYY-MM-DD' format.
-    """
-    def process(self, record):
-        record["insert_date"] = datetime.utcnow().strftime('%Y-%m-%d')
-        yield record
-
 
 def run():
     # Set up Beam pipeline options
@@ -115,8 +103,6 @@ def run():
     google_cloud_options.temp_location = 'gs://earthquake_analysis_data_bucket/stage_loc'
     google_cloud_options.staging_location = 'gs://earthquake_analysis_data_bucket/temp_loc'
     
-    # options.view_as(StandardOptions).runner = 'DataflowRunner'  # Use 'DirectRunner' for local execution
-    
     worker_options = options.view_as(WorkerOptions)
     worker_options.machine_type = 'n1-standard-4'
     
@@ -127,8 +113,6 @@ def run():
     
     bronze_output_path = f"gs://{bucket_name}/beam/landing/{current_date}/earthquake_raw"
     silver_output_path = f"gs://{bucket_name}/beam/silver/{current_date}/earthquake_transformed"
-    
-    table_spec = 'gcp-data-project-433112:earthquake_ingestion.earthquake_table_dataflow'
     
     with beam.Pipeline(options=options) as p:
         # Fetch data from API and write raw data to GCS
@@ -160,71 +144,18 @@ def run():
                             | 'Flatten JSON Data' >> beam.ParDo(FlattenJSONData())
                            )
         
-        # Add 'area' column based on the 'place' value
-        transformed_with_area = (transformed_data
-                                 | 'Add Column Area' >> beam.ParDo(AddColumnArea())
-                                )
+        # # Add 'area' column based on the 'place' value
+        # transformed_with_area = (transformed_data
+        #                          | 'Add Column Area' >> beam.ParDo(AddColumnArea())
+        #                         )
 
-        
-        # Add insert_date to each record
-        transformed_with_insert_date = (transformed_with_area
-                                        | 'Add Insert Date' >> beam.ParDo(AddInsertDate())
-                                       )
-        
-        # Write transformed data to GCS
-        (transformed_with_insert_date
-         | 'Write Transformed Data to GCS' >> beam.io.WriteToText(silver_output_path, 
-                                                                   file_name_suffix=".json", 
-                                                                   shard_name_template="", 
-                                                                   num_shards=1)
-        )
-        
-        table_schema = {
-        "fields": [
-                    {"name": "place", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "mag", "type": "FLOAT", "mode": "NULLABLE"},
-                    {"name": "time", "type": "TIMESTAMP", "mode": "NULLABLE"},
-                    {"name": "updated", "type": "TIMESTAMP", "mode": "NULLABLE"},
-                    {"name": "tz", "type": "INTEGER", "mode": "NULLABLE"},
-                    {"name": "url", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "detail", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "felt", "type": "INTEGER", "mode": "NULLABLE"},
-                    {"name": "cdi", "type": "FLOAT", "mode": "NULLABLE"},
-                    {"name": "mmi", "type": "FLOAT", "mode": "NULLABLE"},
-                    {"name": "alert", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "status", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "tsunami", "type": "INTEGER", "mode": "NULLABLE"},
-                    {"name": "sig", "type": "INTEGER", "mode": "NULLABLE"},
-                    {"name": "net", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "code", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "ids", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "sources", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "types", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "nst", "type": "INTEGER", "mode": "NULLABLE"},
-                    {"name": "dmin", "type": "FLOAT", "mode": "NULLABLE"},
-                    {"name": "rms", "type": "FLOAT", "mode": "NULLABLE"},
-                    {"name": "gap", "type": "FLOAT", "mode": "NULLABLE"},
-                    {"name": "magType", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "type", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "title", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "geometry", "type": "RECORD", "mode": "NULLABLE", "fields": [
-                        {"name": "longitude", "type": "FLOAT", "mode": "NULLABLE"},
-                        {"name": "latitude", "type": "FLOAT", "mode": "NULLABLE"},
-                        {"name": "depth", "type": "FLOAT", "mode": "NULLABLE"}
-                    ]},
-                    {"name": "area", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "insert_date", "type": "DATE", "mode": "NULLABLE"}
-                ]
-            }
-        
-        # Write transformed data to BigQuery
-        transformed_with_insert_date | 'Write to BigQuery' >> beam.io.WriteToBigQuery(
-            table=table_spec,
-            schema=table_schema,
-            write_disposition=BigQueryDisposition.WRITE_APPEND,
-            create_disposition=BigQueryDisposition.CREATE_IF_NEEDED
-        )
-
+        # # Write transformed data to GCS
+        # (transformed_with_area
+        #  | 'Write Transformed Data to GCS' >> beam.io.WriteToText(silver_output_path, 
+        #                                                            file_name_suffix=".json", 
+        #                                                            shard_name_template="", 
+        #                                                            num_shards=1)
+        # )
 
 if __name__ == "__main__":
     run()
