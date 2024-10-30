@@ -224,7 +224,7 @@ def run():
                                  | "Format To JSON" >> beam.Map(lambda x: json.dumps(x))
                                  | "Write Raw Data to GCS" >> beam.io.WriteToText(bronze_output_path, 
                                     file_name_suffix=".json", 
-                                    shard_name_template=""
+                                    num_shards=1
                                     )
                                )
         
