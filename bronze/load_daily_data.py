@@ -59,7 +59,7 @@ class FlattenJSONData(beam.DoFn):
                 "mag": float(properties.get("mag")) if properties.get("mag") is not None else None,
                 "time": convert_timestamp_to_gmt(properties.get("time")),
                 "updated": convert_timestamp_to_gmt(properties.get("updated")),
-                "tz": int(properties.get("tz")) if properties.get("tz") is not None else None,  # Ensure this is an integer
+                "tz": int(properties.get("tz")) if properties.get("tz") is not None else None,  
                 "url": properties.get("url"),
                 "detail": properties.get("detail"),
                 "felt": int(properties.get("felt")) if properties.get("felt") is not None else None,
@@ -127,15 +127,17 @@ def run():
     worker_options.machine_type = 'n1-standard-4'
     
     # Define API URL and GCS bucket  
-    api_url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson"
+    api_url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
     bucket_name = "earthquake_analysis_data1"
     current_date = datetime.now().strftime('%Y%m%d')
     
-    bronze_output_path = f"gs://{bucket_name}/beam/landing/{current_date}/earthquake_raw"
+    bronze_output_path = f"gs://{bucket_name}/beam/daily_landing/{current_date}/earthquake_raw"
     silver_output_path = f"gs://{bucket_name}/beam/silver/{current_date}/earthquake_transformed"
-    parquet_output_path = f"gs://{bucket_name}/beam/silver/{current_date}/earthquake_transformed"
+    parquet_output_path = f"gs://{bucket_name}/beam/silver_daily_load/{current_date}/earthquake_transformed"
     
-    table_spec = 'gcp-data-project-440907:earthquake_ingestion.earthquake_table_dataflow'
+    hist_table_spec = 'gcp-data-project-440907:earthquake_ingestion.earthquake_table_dataflow'
+    # daily_table_spec = 'gcp-data-project-440907:earthquake_ingestion.daily_earthquake_table_dataflow'
+
     
     # Define the table schema before it's used
     table_schema = {
@@ -260,11 +262,19 @@ def run():
         
         
         
-        # Write transformed data to BigQuery
+        # # Write transformed data to BigQuery
+        # transformed_with_insert_date | 'Write to BigQuery' >> beam.io.WriteToBigQuery(
+        #     table=table_spec,
+        #     schema=table_schema,
+        #     write_disposition=BigQueryDisposition.WRITE_TRUNCATE,
+        #     create_disposition=BigQueryDisposition.CREATE_IF_NEEDED
+        # )
+        
+        # Write append transformed daily data to bigquery historical table 
         transformed_with_insert_date | 'Write to BigQuery' >> beam.io.WriteToBigQuery(
-            table=table_spec,
+            table=hist_table_spec,
             schema=table_schema,
-            write_disposition=BigQueryDisposition.WRITE_TRUNCATE,
+            write_disposition=BigQueryDisposition.WRITE_APPEND,
             create_disposition=BigQueryDisposition.CREATE_IF_NEEDED
         )
 
