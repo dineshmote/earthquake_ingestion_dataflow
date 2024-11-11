@@ -122,9 +122,11 @@ def run():
     google_cloud_options.region = "us-east4"
     google_cloud_options.temp_location = 'gs://earthquake_analysis_data1/stage_loc'
     google_cloud_options.staging_location = 'gs://earthquake_analysis_data1/temp_loc'
-    
+    # options.view_as(StandardOptions).requirements_file = 'requirements.txt'
     worker_options = options.view_as(WorkerOptions)
     worker_options.machine_type = 'n1-standard-4'
+    # worker_options.startup_command = 'python startup.py'
+    # worker_options.extra_packages = ['requests==2.31.0'] 
     
     # Define API URL and GCS bucket  
     api_url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"

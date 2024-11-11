@@ -255,7 +255,7 @@ def run():
         transformed_with_insert_date = (p
                                         | 'Read Transformed Data from Parquet' >> ReadFromParquet(parquet_output_path + "*.parquet")
                                         | 'Add Insert Date' >> beam.ParDo(AddInsertDate())
-                                        |'Log Data' >> beam.Map(log_data)
+                                        # |'Log Data' >> beam.Map(log_data)
                                        )
         
         
