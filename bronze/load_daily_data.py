@@ -99,7 +99,7 @@ class AddColumnArea(beam.DoFn):
         if "of" in place:
             area = place.split("of")[1].strip()  # Safely extract the area after 'of'
         else:
-            area = "Unknown"  # Handle cases where 'of' is not found
+            area = place  # Handle cases where 'of' is not found
         record["area"] = area
         yield record
         
@@ -115,18 +115,18 @@ class AddInsertDate(beam.DoFn):
 
 def run():
     # Set up Beam pipeline options
-    options = PipelineOptions()
+    # options = PipelineOptions()
+    bucket_name = "earthquake_analysis_data1"
+    temp_location = f"gs://{bucket_name}/temp"
+    options = PipelineOptions(save_main_session=True, temp_location=temp_location)
     google_cloud_options = options.view_as(GoogleCloudOptions)
     google_cloud_options.project = 'gcp-data-project-440907'
     google_cloud_options.job_name = 'api-data-to-gcs'
     google_cloud_options.region = "us-east4"
     google_cloud_options.temp_location = 'gs://earthquake_analysis_data1/stage_loc'
     google_cloud_options.staging_location = 'gs://earthquake_analysis_data1/temp_loc'
-    # options.view_as(StandardOptions).requirements_file = 'requirements.txt'
     worker_options = options.view_as(WorkerOptions)
     worker_options.machine_type = 'n1-standard-4'
-    # worker_options.startup_command = 'python startup.py'
-    # worker_options.extra_packages = ['requests==2.31.0'] 
     
     # Define API URL and GCS bucket  
     api_url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
@@ -232,20 +232,21 @@ def run():
                                     )
                                )
         
+    with beam.Pipeline(options=options) as p: 
         # Read raw data from GCS
-        raw_data_from_gcs = (write_raw_data_to_gcs
-                             | 'Read Raw Data from GCS' >> beam.io.ReadFromText(bronze_output_path +"*.json")
-                             | 'Parse JSON' >> beam.Map(json.loads)
+        raw_data_from_gcs = (p
+                            | 'Read Raw Data from GCS' >> beam.io.ReadFromText(bronze_output_path +"*.json")
+                            | 'Parse JSON' >> beam.Map(json.loads)
                             )
 
         # Transform and flatten the data
         transformed_data = (raw_data_from_gcs
                             | 'Flatten JSON Data' >> beam.ParDo(FlattenJSONData())
-                           )
+                        )
         
         # Add 'area' column based on the 'place' value
         transformed_with_area = (transformed_data
-                                 | 'Add Column Area' >> beam.ParDo(AddColumnArea())
+                                | 'Add Column Area' >> beam.ParDo(AddColumnArea())
                                 )
         
         # Write transformed data to Parquet before adding insert date
@@ -255,6 +256,8 @@ def run():
             file_name_suffix=".parquet"
         )
         
+    with beam.Pipeline(options=options) as p: 
+            
         # Read the Parquet file back for the insert date operation
         transformed_with_insert_date = (p
                                         | 'Read Transformed Data from Parquet' >> ReadFromParquet(parquet_output_path + "*.parquet")

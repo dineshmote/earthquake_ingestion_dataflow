@@ -11,10 +11,8 @@ from apache_beam.io.gcp.bigquery import WriteToBigQuery, BigQueryDisposition
 import pyarrow as pa
 
 
-# Set environment variable for Google Application Credentials
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"C:\Users\Dinesh Mote\Downloads\gcp-data-project-440907-eb61e9727efa.json"
 logging.getLogger().setLevel(logging.INFO)
-
 
 class FetchDataFromAPI(beam.DoFn):
     """
@@ -28,14 +26,12 @@ class FetchDataFromAPI(beam.DoFn):
         else:
             raise Exception(f"Failed to fetch data from API: {response.status_code}")
 
-
 def log_data(record):
     logging.info("-----------------------------------------------")
     logging.info(record)
     logging.info("-----------------------------------------------")
 
     return record
-
 
 def convert_timestamp_to_gmt(timestamp_ms):
     """
@@ -63,7 +59,7 @@ class FlattenJSONData(beam.DoFn):
                 "mag": float(properties.get("mag")) if properties.get("mag") is not None else None,
                 "time": convert_timestamp_to_gmt(properties.get("time")),
                 "updated": convert_timestamp_to_gmt(properties.get("updated")),
-                "tz": int(properties.get("tz")) if properties.get("tz") is not None else None,  # Ensure this is an integer
+                "tz": int(properties.get("tz")) if properties.get("tz") is not None else None,  
                 "url": properties.get("url"),
                 "detail": properties.get("detail"),
                 "felt": int(properties.get("felt")) if properties.get("felt") is not None else None,
@@ -103,7 +99,7 @@ class AddColumnArea(beam.DoFn):
         if "of" in place:
             area = place.split("of")[1].strip()  # Safely extract the area after 'of'
         else:
-            area = "Unknown"  # Handle cases where 'of' is not found
+            area = place  # Handle cases where 'of' is not found
         record["area"] = area
         yield record
         
@@ -117,9 +113,47 @@ class AddInsertDate(beam.DoFn):
         yield record
 
 
-def get_table_schema():
+def run():
+    # Set up Beam pipeline options
+    # options = PipelineOptions()
+    # options.view_as(SetupOptions).save_main_session = True  
+    # options.view_as(StandardOptions).streaming = True
+    # options.view_as(SetupOptions).setup_staging = True
+    # options.view_as(StandardOptions).runner = 'DataflowRunner'
+    # options.view_as(SetupOptions).project = 'your-project-id'
+    # options.view_as(StandardOptions).region = 'your-region'
+    # options.view_as(SetupOptions).temp_location = 'gs://your-bucket-name/temp
+    # pipeline_options = options.as_options()
+    
+    bucket_name = "earthquake_analysis_data1"
+    temp_location = f"gs://{bucket_name}/temp"
+    options = PipelineOptions(save_main_session=True, temp_location=temp_location)
+    google_cloud_options = options.view_as(GoogleCloudOptions)
+    google_cloud_options = options.view_as(GoogleCloudOptions)
+    google_cloud_options.project = 'gcp-data-project-440907'
+    google_cloud_options.job_name = 'api-data-to-gcs'
+    google_cloud_options.region = "us-east4"
+    google_cloud_options.temp_location = 'gs://earthquake_analysis_data1/stage_loc'
+    google_cloud_options.staging_location = 'gs://earthquake_analysis_data1/temp_loc'
+    worker_options = options.view_as(WorkerOptions)
+    worker_options.machine_type = 'n1-standard-4'
+    
+    
+    # Define API URL and GCS bucket  
+    api_url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
+    bucket_name = "earthquake_analysis_data1"
+    current_date = datetime.now().strftime('%Y%m%d')
+    
+    bronze_output_path = f"gs://{bucket_name}/beam/daily_landing/{current_date}/earthquake_raw"
+    silver_output_path = f"gs://{bucket_name}/beam/silver/{current_date}/earthquake_transformed"
+    parquet_output_path = f"gs://{bucket_name}/beam/silver_daily_load/{current_date}/earthquake_transformed"
+    
+    hist_table_spec = 'gcp-data-project-440907:earthquake_ingestion.earthquake_table_dataflow'
+    # daily_table_spec = 'gcp-data-project-440907:earthquake_ingestion.daily_earthquake_table_dataflow'
+
+    
     # Define the table schema before it's used
-    return {
+    table_schema = {
         "fields": [
             {"name": "place", "type": "STRING", "mode": "NULLABLE"},
             {"name": "mag", "type": "FLOAT", "mode": "NULLABLE"},
@@ -156,11 +190,9 @@ def get_table_schema():
             {"name": "insert_date", "type": "DATE", "mode": "NULLABLE"}
         ]
     }
-
-
-def get_arrow_schema():
+    
     # Define the Apache Arrow schema for Parquet
-    return pa.schema([
+    arrow_schema = pa.schema([
         ("place", pa.string()),
         ("mag", pa.float32()),
         ("time", pa.string()),
@@ -194,3 +226,75 @@ def get_arrow_schema():
         ])),
         ("area", pa.string())
         ])
+        
+    with beam.Pipeline(options=options) as p:
+        # Fetch data from API and write raw data to GCS
+        raw_data = (p
+                    | 'Create API URL' >> beam.Create([api_url])
+                    | 'Fetch Data from API' >> beam.ParDo(FetchDataFromAPI())
+                   )
+        
+        # Write raw data to GCS
+        write_raw_data_to_gcs = (raw_data
+                                 | "Format To JSON" >> beam.Map(lambda x: json.dumps(x))
+                                 | "Write Raw Data to GCS" >> beam.io.WriteToText(bronze_output_path, 
+                                    file_name_suffix=".json", 
+                                    num_shards=1
+                                    )
+                               )
+        
+    with beam.Pipeline(options=options) as p: 
+        # Read raw data from GCS
+        raw_data_from_gcs = (p
+                             | 'Read Raw Data from GCS' >> beam.io.ReadFromText(bronze_output_path +"*.json")
+                             | 'Parse JSON' >> beam.Map(json.loads)
+                            )
+
+        # Transform and flatten the data
+        transformed_data = (raw_data_from_gcs
+                            | 'Flatten JSON Data' >> beam.ParDo(FlattenJSONData())
+                           )
+        
+        # Add 'area' column based on the 'place' value
+        transformed_with_area = (transformed_data
+                                 | 'Add Column Area' >> beam.ParDo(AddColumnArea())
+                                )
+        
+        # Write transformed data to Parquet before adding insert date
+        transformed_with_area | 'Write to Parquet' >> WriteToParquet(
+            file_path_prefix=parquet_output_path,
+            schema=arrow_schema,
+            file_name_suffix=".parquet"
+        )
+        
+    with beam.Pipeline(options=options) as p: 
+
+        # Read the Parquet file back for the insert date operation
+        transformed_with_insert_date = (p
+                                        | 'Read Transformed Data from Parquet' >> ReadFromParquet(parquet_output_path + "*.parquet")
+                                        | 'Add Insert Date' >> beam.ParDo(AddInsertDate())
+                                        |'Log Data' >> beam.Map(log_data)
+                                       )
+        
+        
+        
+        # # Write transformed data to BigQuery
+        # transformed_with_insert_date | 'Write to BigQuery' >> beam.io.WriteToBigQuery(
+        #     table=table_spec,
+        #     schema=table_schema,
+        #     write_disposition=BigQueryDisposition.WRITE_TRUNCATE,
+        #     create_disposition=BigQueryDisposition.CREATE_IF_NEEDED
+        # )
+        
+        # Write append transformed daily data to bigquery historical table 
+        transformed_with_insert_date | 'Write to BigQuery' >> beam.io.WriteToBigQuery(
+            table=hist_table_spec,
+            schema=table_schema,
+            write_disposition=BigQueryDisposition.WRITE_APPEND,
+            create_disposition=BigQueryDisposition.CREATE_IF_NEEDED
+        )
+
+
+
+if __name__ == "__main__":
+    run()
